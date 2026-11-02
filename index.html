@@ -65,7 +65,12 @@
         <option value="ready">SPM ready</option>
         <option value="added-later">SPM added later</option>
         <option value="no-spm">No Package.swift</option>
-        <option value="unresolved">Unresolved</option>
+        <optgroup label="Unresolved">
+          <option value="non-github">Not GitHub</option>
+          <option value="no-podspec">Podspec not found</option>
+          <option value="no-version">No version</option>
+          <option value="error">Check failed</option>
+        </optgroup>
       </select>
       <div class="spacer"></div>
       <button id="exportJson" class="btn" type="button">Export JSON</button>

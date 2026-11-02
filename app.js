@@ -115,7 +115,7 @@ function renderSummary() {
   const stats = [
     ['Pods', c.total, ''],
     ['SPM ready', c.ready, 'good'],
-    ['Added later', c['added-later'], 'warn'],
+    ['SPM added later', c['added-later'], 'warn'],
     ['No Package.swift', c['no-spm'], 'warn'],
     ['Unresolved', c.unresolved, ''],
   ];
@@ -275,7 +275,8 @@ function renderRows() {
     const result = state.results[i];
     if (filter !== 'all') {
       if (!result) return;
-      if ((GROUP[result.status] ?? 'unresolved') !== filter) return;
+      const group = GROUP[result.status] ?? 'unresolved';
+      if (group !== filter && result.status !== filter) return;
     }
     if (query && !matchQuery(pod, result, query)) return;
     frag.appendChild(buildRow(pod, result));
