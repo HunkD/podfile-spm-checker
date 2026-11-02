@@ -1,0 +1,11 @@
+{
+  "name": "podfile-spm-checker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static site that checks whether pods in a Podfile.lock ship Swift Package Manager support at the same version.",
+  "scripts": {
+    "test": "node --test test/lib.test.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}

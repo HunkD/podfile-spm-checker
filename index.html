@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Podfile → SPM Checker</title>
+<meta name="description" content="Check whether every pod in a Podfile.lock ships a Swift Package Manager package at the same version. Runs entirely in your browser.">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1216" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">📦</span>
+      <div>
+        <h1>Podfile → SPM Checker</h1>
+        <p class="sub">Drop a <code>Podfile.lock</code>. See which pods ship a <code>Package.swift</code> at the same version.</p>
+      </div>
+    </div>
+    <a class="repo-link" href="https://github.com/HunkD/podfile-spm-checker" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card uploader" aria-labelledby="upload-title">
+    <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Choose or drop a Podfile.lock">
+      <div class="dz-icon" aria-hidden="true">⇪</div>
+      <p id="upload-title"><strong>Drop a Podfile.lock</strong> or <span class="fake-link">browse files</span></p>
+      <p class="hint">The file never leaves your browser. All checks run client-side.</p>
+      <input type="file" id="fileInput" accept=".lock,.txt,text/plain" hidden>
+    </div>
+
+    <details class="paste">
+      <summary>Or paste the contents</summary>
+      <label class="sr-only" for="pasteArea">Podfile.lock contents</label>
+      <textarea id="pasteArea" spellcheck="false" placeholder="PODS:&#10;  - Alamofire (5.6.4)&#10;  - SnapKit (5.6.0)"></textarea>
+      <div class="paste-actions">
+        <button id="scanPaste" class="btn primary" type="button">Check pasted lockfile</button>
+        <button id="loadSample" class="btn ghost" type="button">Load sample</button>
+      </div>
+    </details>
+
+    <p class="error" id="errorBox" role="alert" hidden></p>
+  </section>
+
+  <section id="results" hidden aria-labelledby="results-title">
+    <h2 id="results-title" class="sr-only">Results</h2>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="progress-row">
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressWrap">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <p class="scan-status" id="scanStatus" aria-live="polite"></p>
+    </div>
+
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Filter pods, versions, repos…" aria-label="Filter results">
+      <select id="statusFilter" aria-label="Filter by status">
+        <option value="all">All statuses</option>
+        <option value="ready">SPM ready</option>
+        <option value="added-later">SPM added later</option>
+        <option value="no-spm">No Package.swift</option>
+        <option value="unresolved">Unresolved</option>
+      </select>
+      <div class="spacer"></div>
+      <button id="exportJson" class="btn" type="button">Export JSON</button>
+      <button id="exportCsv" class="btn" type="button">Export CSV</button>
+      <button id="copyMd" class="btn" type="button">Copy Markdown</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Pod</th>
+            <th scope="col">Version</th>
+            <th scope="col">Status</th>
+            <th scope="col">Matched tag</th>
+            <th scope="col">Repository</th>
+            <th scope="col">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <p class="empty" id="emptyState" hidden>No pods match this filter.</p>
+    </div>
+  </section>
+
+  <section class="card explain">
+    <h2>How a pod is marked SPM ready</h2>
+    <ol>
+      <li>Reads every root pod and exact version from the <code>PODS</code> section.</li>
+      <li>Finds the published podspec on the CocoaPods CDN (sharded by MD5 of the pod name) and takes its <code>source.git</code>.</li>
+      <li>Probes <code>raw.githubusercontent.com</code> for <code>Package.swift</code> at the podspec tag, the version tag, and common <code>v</code>/name-prefixed spellings.</li>
+    </ol>
+    <p class="hint">Only the main CocoaPods trunk is checked. Private pods, custom spec repos, and non-GitHub sources are reported as unresolved.</p>
+  </section>
+</main>
+
+<footer class="wrap site-footer">
+  <p>Static site. No backend, no analytics. Results are cached locally for 7 days.
+    <button id="clearCache" class="linkish" type="button">Clear cache</button>
+  </p>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
