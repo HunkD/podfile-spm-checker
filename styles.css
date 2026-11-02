@@ -389,10 +389,9 @@ tbody tr:hover { background: var(--panel-soft); }
 td.version, td.tag-cell { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
 td.notes { color: var(--muted); max-width: 340px; }
 .notes-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 14px; }
