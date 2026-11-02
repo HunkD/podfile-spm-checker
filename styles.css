@@ -387,7 +387,8 @@ tbody tr:hover { background: var(--panel-soft); }
 .badge.pending { color: var(--muted); background: var(--muted-bg); }
 
 td.version, td.tag-cell { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
-td.notes { color: var(--muted); max-width: 340px; }
+td.notes { color: var(--muted); min-width: 420px; max-width: 620px; }
+td.repo { max-width: 240px; overflow-wrap: anywhere; }
 .notes-text {
   display: block;
   white-space: normal;

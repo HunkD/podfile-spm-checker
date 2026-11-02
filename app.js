@@ -232,6 +232,7 @@ function buildRow(pod, result) {
 
   // Repository
   const repoTd = document.createElement('td');
+  repoTd.className = 'repo';
   if (result?.sourceUrl) {
     const a = document.createElement('a');
     a.href = result.sourceUrl;
