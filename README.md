@@ -50,7 +50,7 @@ For every root pod in the `PODS` section:
 | **SPM added later** | No `Package.swift` at this version, but `main`/`master` has one — upgrading would unlock SPM. |
 | **SPM in other repo** | `Package.swift` found in a commonly named separate repo. Confirm the two release lines match, or set an override. |
 | **No Package.swift** | Repository resolved, but no `Package.swift` at any probed tag, default branch, or separate-repo candidate. |
-| **No git repo** | Podspec has no `source.git`, and its `source.http` is not a GitHub release/archive URL to infer a repository from (binary SDK, zip/tarball, or other non-git distribution). Check the vendor's SPM docs. |
+| **No git repo** | Podspec has no `source.git`, and its `source.http` is not a GitHub release/archive URL to infer a repository from (binary SDK, zip/tarball, or other non-git distribution). The row links to a Swift Package Index search. |
 | **Host not checked** | Repo is on a host without a CORS-enabled file API (self-hosted GitLab/Gitea, other hosts), or the URL is unrecognized. Add an override to check it. |
 | **Podspec not found** | Version is not on the main CocoaPods trunk (private pod, custom spec repo, or local path). |
 | **No version** | Local/external pod without a semver version in the lockfile. |

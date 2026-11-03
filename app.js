@@ -1,4 +1,4 @@
-import { parsePodfileLock, parseOverrides, scanPods, STATUSES } from './lib.js';
+import { parsePodfileLock, parseOverrides, scanPods, swiftPackageIndexUrl, STATUSES } from './lib.js';
 
 const CACHE_KEY = 'podfile-spm-checker:cache:v3';
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
@@ -256,6 +256,15 @@ function buildRow(pod, result) {
       ? `${repoUrl}\nPod repo: ${result.podRepoUrl}`
       : repoUrl;
     repoTd.appendChild(a);
+  } else if (result?.status === 'non-git') {
+    const search = document.createElement('a');
+    search.className = 'spi-link';
+    search.href = swiftPackageIndexUrl(result.name);
+    search.target = '_blank';
+    search.rel = 'noopener noreferrer';
+    search.textContent = 'Search Swift Package Index';
+    search.title = `Search Swift Package Index for ${result.name}`;
+    repoTd.appendChild(search);
   } else {
     repoTd.textContent = '—';
   }
