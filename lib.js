@@ -3,6 +3,18 @@
 const SPEC_CDN = 'https://cdn.jsdelivr.net/cocoa/Specs';
 const RAW = 'https://raw.githubusercontent.com';
 
+// Hosts with a public, CORS-enabled way to read a file at a ref.
+// Self-hosted GitLab/Gitea instances are deliberately absent: the browser
+// cannot read them unless that instance sets CORS headers.
+const HOST_KINDS = {
+  'github.com': 'github',
+  'gitlab.com': 'gitlab',
+  'bitbucket.org': 'bitbucket',
+  'gitee.com': 'gitee',
+  'codeberg.org': 'gitea',
+  'gitea.com': 'gitea',
+};
+
 /* ------------------------------- MD5 ------------------------------- */
 
 const SHIFT = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
@@ -75,6 +87,82 @@ export function rawFileUrl(owner, repo, ref, path) {
   return `${RAW}/${owner}/${repo}/${encodeURIComponent(ref).replace(/%2F/g, '/')}/${path}`;
 }
 
+/** A URL that returns the raw text of `Package.swift` for a normalized repo. */
+export function packageSwiftUrl(repo, ref) {
+  const refPath = encodeURIComponent(ref).replace(/%2F/g, '/');
+  switch (repo.kind) {
+    case 'github':
+      return `${RAW}/${repo.path}/${refPath}/Package.swift`;
+    case 'gitlab':
+      // The raw web endpoint (/-/raw/) does not send CORS headers, but the
+      // public API does.
+      return `https://${repo.host}/api/v4/projects/${encodeURIComponent(repo.path)}` +
+        `/repository/files/Package.swift/raw?ref=${encodeURIComponent(ref)}`;
+    case 'bitbucket':
+      return `https://api.bitbucket.org/2.0/repositories/${repo.path}` +
+        `/src/${refPath}/Package.swift`;
+    case 'gitea':
+      return `https://${repo.host}/api/v1/repos/${repo.path}/raw/Package.swift` +
+        `?ref=${encodeURIComponent(ref)}`;
+    case 'gitee':
+      // Gitee's contents API returns 200 with [] for a missing file, so the
+      // response body has to be checked as well.
+      return `https://${repo.host}/api/v5/repos/${repo.path}/contents/Package.swift` +
+        `?ref=${encodeURIComponent(ref)}`;
+    default:
+      return `https://${repo.host}/${repo.path}/raw/${refPath}/Package.swift`;
+  }
+}
+
+/**
+ * Repositories that commonly hold SPM support for a CocoaPods project that
+ * keeps its package manifest outside the CocoaPods repo.
+ */
+const SEPARATE_REPO_NAMES = [
+  (name) => `${name}-spm`,
+  (name) => `${name}-swiftpm`,
+  (name) => `${name}-swift-package`,
+  (name) => `swift-package-manager-${name}`,
+];
+
+export function spmRepoCandidates(repo) {
+  const dir = repo.path.split('/').slice(0, -1);
+  return SEPARATE_REPO_NAMES.map((makeName) => {
+    const name = makeName(repo.name);
+    const path = [...dir, name].join('/');
+    return {
+      ...repo,
+      path,
+      repo: path.split('/').slice(1).join('/'),
+      name,
+      url: `https://${repo.host}/${path}`,
+    };
+  });
+}
+
+/**
+ * Parse user-supplied `PodName = repository` overrides.
+ * Bare `owner/repo` values are treated as GitHub repositories.
+ */
+export function parseOverrides(text) {
+  const map = new Map();
+  if (!text) return map;
+  text.split(/\r?\n/).forEach((line, i) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) throw new Error(`Override line ${i + 1}: expected "PodName = repository URL"`);
+    const name = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (!name || !value) throw new Error(`Override line ${i + 1}: empty pod name or repository`);
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^[^@/]+@/.test(value) && !value.includes(':')) {
+      value = `https://github.com/${value}`;
+    }
+    map.set(name, value);
+  });
+  return map;
+}
+
 /* ---------------------------- Podfile.lock ---------------------------- */
 
 /**
@@ -130,30 +218,62 @@ export function parsePodfileLock(text) {
 
 /* ------------------------------- Git URLs ------------------------------- */
 
-/** Normalize the many forms of a podspec `source.git` into host/owner/repo. */
+/**
+ * Normalize the many forms of a podspec `source.git` into host/owner/repo.
+ * `path` keeps GitLab subgroups ("group/sub/project"); `name` is the last segment.
+ */
 export function normalizeGitUrl(input) {
   if (!input || typeof input !== 'string') return null;
-  let u = input.trim().replace(/^git\+/, '');
+  const u = input.trim().replace(/^git\+/, '');
 
-  let host, owner, repo;
-  let m = u.match(/^[a-z]+:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/([^/]+)\/(.+)$/i);
+  let host, path;
+  let m = u.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i);
   if (m) {
     host = m[1];
-    owner = m[2];
-    repo = m[3];
+    path = m[2];
   } else {
     // scp-like: git@github.com:owner/repo.git
-    m = u.match(/^(?:[^@/]+@)?([^:/]+):([^/]+)\/(.+)$/);
+    m = u.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
     if (!m) return null;
     host = m[1];
-    owner = m[2];
-    repo = m[3];
+    path = m[2];
   }
 
-  repo = repo.replace(/\/+$/, '').replace(/\.git$/i, '');
-  owner = owner.replace(/^~/, '');
-  if (!host || !owner || !repo) return null;
-  return { host: host.toLowerCase(), owner, repo, url: `https://${host}/${owner}/${repo}` };
+  host = host.toLowerCase().replace(/^www\./, '');
+  path = path
+    .replace(/[?#].*$/, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/i, '');
+  const segments = path.split('/').filter(Boolean);
+  if (!host || segments.length < 2) return null;
+
+  segments[0] = segments[0].replace(/^~/, '');
+  const cleanPath = segments.join('/');
+  const owner = segments[0];
+  const repo = segments.slice(1).join('/');
+  const name = segments[segments.length - 1];
+  return {
+    host,
+    path: cleanPath,
+    owner,
+    repo,
+    name,
+    kind: HOST_KINDS[host] ?? 'unknown',
+    url: `https://${host}/${cleanPath}`,
+  };
+}
+
+/**
+ * Infer the source repository from a binary podspec `source.http` URL.
+ * Binary pods often publish a zip/tarball as a GitHub release asset or archive,
+ * even though the podspec has no `source.git` (e.g. BrazeKit).
+ */
+export function repoFromBinaryUrl(input) {
+  if (!input || typeof input !== 'string') return null;
+  const m = input.trim().match(/^https?:\/\/github\.com\/([^/?#]+)\/([^/?#]+)\/(?:releases|archive)\//i);
+  if (!m) return null;
+  return normalizeGitUrl(`https://github.com/${m[1]}/${m[2].replace(/\.git$/i, '')}`);
 }
 
 /* ------------------------------ Probing ------------------------------ */
@@ -209,11 +329,50 @@ async function probe(fetchImpl, url, { retries = 1 } = {}) {
   return { ok: false, error: lastError };
 }
 
+function decodeBase64Utf8(base64) {
+  const binary = atob(base64.replace(/\s+/g, ''));
+  const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/** Fetch Package.swift, normalizing host-specific responses (Gitee returns JSON). */
+async function fetchPackageSwift(fetchImpl, repo, ref) {
+  const res = await probe(fetchImpl, packageSwiftUrl(repo, ref));
+  if (!res.ok || repo.kind !== 'gitee') return res;
+
+  try {
+    const data = JSON.parse(res.text);
+    if (!data || Array.isArray(data) || data.type !== 'file') return { ok: false, status: 404 };
+    return { ok: true, text: decodeBase64Utf8(data.content ?? '') };
+  } catch {
+    return { ok: false, error: new Error('Unexpected Gitee API response') };
+  }
+}
+
+/** Probe a repo at each ref; returns the first hit, or the last network error. */
+async function probeRefs(fetchImpl, repo, refs) {
+  let networkError = null;
+  for (const ref of refs) {
+    const res = await fetchPackageSwift(fetchImpl, repo, ref);
+    if (res.ok) return { ref, text: res.text };
+    if (res.error) networkError = res.error;
+  }
+  return { networkError };
+}
+
 /**
  * Resolve one pod: podspec -> git repo -> Package.swift at the matching tag.
- * Statuses: ready | added-later | no-spm | non-github | no-podspec | error
+ * Statuses: ready | added-later | spm-repo | no-spm | non-git | unverified |
+ *           no-podspec | no-version | error
+ *
+ * `override` forces the repository to probe. It is the escape hatch for pods
+ * whose SPM package lives in another repo (or on a host the browser cannot read).
  */
-export async function scanPod(fetchImpl, pod, { defaultBranches = ['main', 'master'] } = {}) {
+export async function scanPod(
+  fetchImpl,
+  pod,
+  { defaultBranches = ['main', 'master'], override = null } = {},
+) {
   const base = {
     name: pod.root,
     version: pod.version,
@@ -242,53 +401,97 @@ export async function scanPod(fetchImpl, pod, { defaultBranches = ['main', 'mast
   }
 
   const git = spec?.source?.git;
-  if (!git) {
-    return { ...base, status: 'non-github', detail: 'Podspec declares no git source' };
+  const podRepo = git ? normalizeGitUrl(git) : null;
+  // Binary pods can still ship SPM from the repo their release asset came from.
+  const inferredRepo = git ? null : repoFromBinaryUrl(spec?.source?.http);
+  if (podRepo) base.podRepoUrl = podRepo.url;
+  else if (inferredRepo) {
+    base.podRepoUrl = inferredRepo.url;
+    base.inferredFrom = spec.source.http;
   }
 
-  const repo = normalizeGitUrl(git);
-  if (!repo) {
-    return { ...base, status: 'non-github', detail: `Unrecognized git URL: ${git}` };
+  let repo = null;
+  const overridden = Boolean(override);
+  if (overridden) {
+    repo = normalizeGitUrl(override);
+    if (!repo) {
+      return { ...base, status: 'error', detail: `Invalid override repository: ${override}` };
+    }
+    // Allow "gitlab+https://host/group/project" to force an adapter on a
+    // self-hosted instance that exposes CORS.
+    const kindHint = override.match(/^(github|gitlab|bitbucket|gitea|gitee)\+/i)?.[1]?.toLowerCase();
+    if (kindHint) repo = { ...repo, kind: kindHint };
+    base.overridden = true;
+  } else if (!git && !inferredRepo) {
+    return {
+      ...base,
+      status: 'non-git',
+      detail: 'Podspec has no git source (binary or non-git distribution); check the vendor for an SPM package',
+    };
+  } else if (!git) {
+    repo = inferredRepo;
+  } else if (!podRepo) {
+    return { ...base, status: 'unverified', detail: `Unrecognized git URL: ${git}` };
+  } else {
+    repo = podRepo;
   }
+
+  if (repo.kind === 'unknown') {
+    return {
+      ...base,
+      status: 'unverified',
+      detail: `Hosted on ${repo.host}, which has no CORS-enabled file API. Open ${repo.url} or add an override.`,
+    };
+  }
+
   base.sourceUrl = repo.url;
   base.sourceTag = spec?.source?.tag ?? null;
-
-  if (repo.host !== 'github.com') {
-    return { ...base, status: 'non-github', detail: `Hosted on ${repo.host}, not GitHub` };
-  }
-
   const tags = tagCandidates(pod.root, pod.version, base.sourceTag);
-  let networkError = null;
 
-  for (const tag of tags) {
-    const url = rawFileUrl(repo.owner, repo.repo, tag, 'Package.swift');
-    const res = await probe(fetchImpl, url);
-    if (res.ok) {
-      return {
-        ...base,
-        status: 'ready',
-        tag,
-        packageUrl: url,
-        toolsVersion: toolsVersion(res.text),
-      };
-    }
-    if (res.error) networkError = res.error;
+  const tagHit = await probeRefs(fetchImpl, repo, tags);
+  if (tagHit.ref) {
+    return {
+      ...base,
+      status: 'ready',
+      tag: tagHit.ref,
+      packageUrl: packageSwiftUrl(repo, tagHit.ref),
+      toolsVersion: toolsVersion(tagHit.text),
+    };
+  }
+  if (tagHit.networkError) {
+    return { ...base, status: 'error', detail: `${repo.host} fetch failed: ${tagHit.networkError.message}` };
   }
 
-  if (networkError) {
-    return { ...base, status: 'error', detail: `GitHub raw fetch failed: ${networkError.message}` };
+  const branchHit = await probeRefs(fetchImpl, repo, defaultBranches);
+  if (branchHit.ref) {
+    return {
+      ...base,
+      status: 'added-later',
+      tag: branchHit.ref,
+      packageUrl: packageSwiftUrl(repo, branchHit.ref),
+      detail: `Package.swift exists on ${branchHit.ref} but not at tag ${pod.version} (SPM support added after this release)`,
+    };
+  }
+  if (branchHit.networkError) {
+    return { ...base, status: 'error', detail: `${repo.host} fetch failed: ${branchHit.networkError.message}` };
   }
 
-  for (const branch of defaultBranches) {
-    const url = rawFileUrl(repo.owner, repo.repo, branch, 'Package.swift');
-    const res = await probe(fetchImpl, url);
-    if (res.ok) {
+  // No manifest in the CocoaPods repo: look for the common "separate SPM repo"
+  // pattern (e.g. aws-sdk-ios -> aws-sdk-ios-spm). The verdict stays manual
+  // because release lines in the two repos may not line up.
+  if (!overridden) {
+    for (const candidate of spmRepoCandidates(repo)) {
+      const candidateHit = await probeRefs(fetchImpl, candidate, defaultBranches);
+      if (!candidateHit.ref) continue;
+      const candidateTag = await probeRefs(fetchImpl, candidate, tags);
+      const ref = candidateTag.ref ?? candidateHit.ref;
       return {
         ...base,
-        status: 'added-later',
-        tag: branch,
-        packageUrl: url,
-        detail: `Package.swift exists on ${branch} but not at tag ${pod.version} (SPM support added after this release)`,
+        status: 'spm-repo',
+        sourceUrl: candidate.url,
+        tag: ref,
+        packageUrl: packageSwiftUrl(candidate, ref),
+        detail: `Package.swift found in separate repository ${candidate.url} at ${ref}; confirm it matches version ${pod.version}`,
       };
     }
   }
@@ -296,12 +499,12 @@ export async function scanPod(fetchImpl, pod, { defaultBranches = ['main', 'mast
   return {
     ...base,
     status: 'no-spm',
-    detail: `No Package.swift at any tag candidate (${tags.join(', ')}) or on main/master`,
+    detail: `No Package.swift at any tag candidate (${tags.join(', ')}) or on ${defaultBranches.join('/')}`,
   };
 }
 
 /** Run scans with bounded concurrency; onResult fires as each pod finishes. */
-export async function scanPods(fetchImpl, pods, { concurrency = 6, onResult } = {}) {
+export async function scanPods(fetchImpl, pods, { concurrency = 6, onResult, overrides } = {}) {
   const queue = [...pods];
   const results = new Array(pods.length);
   let nextIndex = 0;
@@ -309,7 +512,9 @@ export async function scanPods(fetchImpl, pods, { concurrency = 6, onResult } = 
   async function worker() {
     while (nextIndex < pods.length) {
       const index = nextIndex++;
-      const result = await scanPod(fetchImpl, queue[index]);
+      const result = await scanPod(fetchImpl, queue[index], {
+        override: overrides?.get(queue[index].root) ?? null,
+      });
       results[index] = result;
       onResult?.(result, index);
     }
@@ -322,8 +527,10 @@ export async function scanPods(fetchImpl, pods, { concurrency = 6, onResult } = 
 export const STATUSES = {
   ready: { label: 'SPM ready', tone: 'good' },
   'added-later': { label: 'SPM added later', tone: 'warn' },
+  'spm-repo': { label: 'SPM in other repo', tone: 'warn' },
   'no-spm': { label: 'No Package.swift', tone: 'warn' },
-  'non-github': { label: 'Not GitHub', tone: 'muted' },
+  'non-git': { label: 'No git repo', tone: 'muted' },
+  unverified: { label: 'Host not checked', tone: 'muted' },
   'no-podspec': { label: 'Podspec not found', tone: 'muted' },
   'no-version': { label: 'No version', tone: 'muted' },
   error: { label: 'Check failed', tone: 'bad' },

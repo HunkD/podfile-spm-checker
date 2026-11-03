@@ -43,6 +43,14 @@
       </div>
     </details>
 
+    <details class="paste">
+      <summary>SPM repository overrides <span class="hint">(optional)</span></summary>
+      <p class="hint">One per line: <code>PodName = https://github.com/owner/repo</code>.
+        Bare <code>owner/repo</code> means GitHub. For a self-hosted GitLab or
+        Gitea with CORS enabled, prefix the URL: <code>gitlab+https://git.example.com/group/Pod</code>.</p>
+      <textarea id="overrideArea" spellcheck="false" placeholder="AWSCore = https://github.com/aws-amplify/aws-sdk-ios-spm&#10;Google-Mobile-Ads-SDK = googleads/swift-package-manager-google-mobile-ads"></textarea>
+    </details>
+
     <p class="error" id="errorBox" role="alert" hidden></p>
   </section>
 
@@ -64,9 +72,11 @@
         <option value="all">All statuses</option>
         <option value="ready">SPM ready</option>
         <option value="added-later">SPM added later</option>
+        <option value="spm-repo">SPM in other repo</option>
         <option value="no-spm">No Package.swift</option>
         <optgroup label="Unresolved">
-          <option value="non-github">Not GitHub</option>
+          <option value="non-git">No git repo</option>
+          <option value="unverified">Host not checked</option>
           <option value="no-podspec">Podspec not found</option>
           <option value="no-version">No version</option>
           <option value="error">Check failed</option>
@@ -100,10 +110,11 @@
     <h2>How a pod is marked SPM ready</h2>
     <ol>
       <li>Reads every root pod and exact version from the <code>PODS</code> section.</li>
-      <li>Finds the published podspec on the CocoaPods CDN (sharded by MD5 of the pod name) and takes its <code>source.git</code>.</li>
-      <li>Probes <code>raw.githubusercontent.com</code> for <code>Package.swift</code> at the podspec tag, the version tag, and common <code>v</code>/name-prefixed spellings.</li>
+      <li>Finds the published podspec on the CocoaPods CDN (sharded by MD5 of the pod name) and takes its <code>source.git</code>. Binary podspecs that point <code>source.http</code> at a GitHub release or archive have their repository inferred from that URL.</li>
+      <li>Probes the repository for <code>Package.swift</code> at the podspec tag, the version tag, and common <code>v</code>/name-prefixed spellings. GitHub, GitLab, Bitbucket, Gitee, and Codeberg/Gitea hosts are supported.</li>
+      <li>When the package lives in a separate repo, tries common names such as <code>Project-spm</code> and <code>swift-package-manager-Project</code>. Use the overrides box for anything else.</li>
     </ol>
-    <p class="hint">Only the main CocoaPods trunk is checked. Private pods, custom spec repos, and non-GitHub sources are reported as unresolved.</p>
+    <p class="hint">Only the main CocoaPods trunk is checked. Private pods, custom spec repos, self-hosted git hosts, and binary pods without an inferable GitHub repository are reported as unresolved.</p>
   </section>
 </main>
 

@@ -1,6 +1,6 @@
-import { parsePodfileLock, scanPods, STATUSES } from './lib.js';
+import { parsePodfileLock, parseOverrides, scanPods, STATUSES } from './lib.js';
 
-const CACHE_KEY = 'podfile-spm-checker:cache:v1';
+const CACHE_KEY = 'podfile-spm-checker:cache:v3';
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 const CONCURRENCY = 6;
 
@@ -12,6 +12,7 @@ const ui = {
   pasteArea: $('pasteArea'),
   scanPaste: $('scanPaste'),
   loadSample: $('loadSample'),
+  overrideArea: $('overrideArea'),
   errorBox: $('errorBox'),
   results: $('results'),
   summary: $('summary'),
@@ -44,8 +45,10 @@ let toastTimer = 0;
 const GROUP = {
   ready: 'ready',
   'added-later': 'added-later',
+  'spm-repo': 'spm-repo',
   'no-spm': 'no-spm',
-  'non-github': 'unresolved',
+  'non-git': 'unresolved',
+  unverified: 'unresolved',
   'no-podspec': 'unresolved',
   'no-version': 'unresolved',
   error: 'unresolved',
@@ -96,12 +99,12 @@ function writeCache(cache) {
   }
 }
 
-const cacheKey = (pod) => `${pod.root}@${pod.version}`;
+const cacheKey = (pod, override) => `${pod.root}@${pod.version}@${override ?? ''}`;
 
 /* ----------------------------- Rendering ----------------------------- */
 
 function counts() {
-  const c = { total: state.pods.length, ready: 0, 'added-later': 0, 'no-spm': 0, unresolved: 0 };
+  const c = { total: state.pods.length, ready: 0, 'added-later': 0, 'spm-repo': 0, 'no-spm': 0, unresolved: 0 };
   for (const r of state.results) {
     if (!r) continue;
     const group = GROUP[r.status] ?? 'unresolved';
@@ -116,6 +119,7 @@ function renderSummary() {
     ['Pods', c.total, ''],
     ['SPM ready', c.ready, 'good'],
     ['SPM added later', c['added-later'], 'warn'],
+    ['SPM in other repo', c['spm-repo'], 'warn'],
     ['No Package.swift', c['no-spm'], 'warn'],
     ['Unresolved', c.unresolved, ''],
   ];
@@ -161,6 +165,7 @@ function matchQuery(pod, result, query) {
     STATUSES[result?.status]?.label,
     result?.tag,
     result?.sourceUrl,
+    result?.podRepoUrl,
     result?.detail,
   ].filter(Boolean).join(' ').toLowerCase();
   return hay.includes(query);
@@ -198,6 +203,13 @@ function buildRow(pod, result) {
     note.title = 'Only subspecs of this pod appear in PODS';
     meta.appendChild(note);
   }
+  if (result?.overridden) {
+    const override = document.createElement('span');
+    override.className = 'tag direct';
+    override.textContent = 'override';
+    override.title = 'Repository supplied in SPM overrides';
+    meta.appendChild(override);
+  }
   if (meta.childNodes.length) podCell.appendChild(meta);
   podTd.appendChild(podCell);
   tr.appendChild(podTd);
@@ -233,13 +245,16 @@ function buildRow(pod, result) {
   // Repository
   const repoTd = document.createElement('td');
   repoTd.className = 'repo';
-  if (result?.sourceUrl) {
+  const repoUrl = result?.sourceUrl ?? result?.podRepoUrl;
+  if (repoUrl) {
     const a = document.createElement('a');
-    a.href = result.sourceUrl;
+    a.href = repoUrl;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.textContent = result.sourceUrl.replace(/^https?:\/\/(www\.)?/, '');
-    a.title = result.sourceUrl;
+    a.textContent = repoUrl.replace(/^https?:\/\/(www\.)?/, '');
+    a.title = result.podRepoUrl && result.podRepoUrl !== repoUrl
+      ? `${repoUrl}\nPod repo: ${result.podRepoUrl}`
+      : repoUrl;
     repoTd.appendChild(a);
   } else {
     repoTd.textContent = '—';
@@ -254,6 +269,8 @@ function buildRow(pod, result) {
     note = result.toolsVersion
       ? `Package.swift (swift-tools-version ${result.toolsVersion})`
       : 'Package.swift found at tag';
+    if (result.overridden) note += ' · override repo';
+    if (result.inferredFrom) note += ' · repo inferred from binary source';
   }
   if (!result) note = 'Resolving podspec…';
   const noteSpan = document.createElement('span');
@@ -319,6 +336,14 @@ async function startScan(text, sourceName) {
     return;
   }
 
+  let overrides;
+  try {
+    overrides = parseOverrides(ui.overrideArea?.value);
+  } catch (err) {
+    showError(err.message);
+    return;
+  }
+
   const token = ++scanToken;
   state.sourceName = sourceName;
   state.pods = parsed.pods;
@@ -337,12 +362,13 @@ async function startScan(text, sourceName) {
   const pending = [];
   for (let i = 0; i < state.pods.length; i++) {
     const pod = state.pods[i];
-    const hit = cache[cacheKey(pod)];
+    const override = overrides.get(pod.root) ?? null;
+    const hit = cache[cacheKey(pod, override)];
     if (hit && Date.now() - hit.at < CACHE_TTL) {
       state.results[i] = { ...hit.result, cached: true };
       state.done += 1;
     } else {
-      pending.push({ pod, index: i });
+      pending.push({ pod, index: i, override });
     }
   }
   render();
@@ -352,12 +378,13 @@ async function startScan(text, sourceName) {
   try {
     await scanPods(fetch, pending.map((p) => p.pod), {
       concurrency: CONCURRENCY,
+      overrides,
       onResult: (result, j) => {
         if (token !== scanToken) return;
-        const { pod, index } = pending[j];
+        const { pod, index, override } = pending[j];
         state.results[index] = result;
         state.done += 1;
-        cache[cacheKey(pod)] = { at: Date.now(), result };
+        cache[cacheKey(pod, override)] = { at: Date.now(), result };
         cacheChanged = true;
         render();
       },
@@ -398,6 +425,8 @@ function buildReport() {
       status: r.status,
       matchedTag: r.tag ?? null,
       repository: r.sourceUrl ?? null,
+      podRepository: r.podRepoUrl ?? null,
+      overridden: Boolean(r.overridden),
       packageSwift: r.packageUrl ?? null,
       toolsVersion: r.toolsVersion ?? null,
       detail: r.detail ?? null,
@@ -427,9 +456,15 @@ function csvCell(value) {
 }
 
 function exportCsv() {
-  const rows = [['pod', 'version', 'status', 'matchedTag', 'repository', 'toolsVersion', 'detail']];
+  const rows = [[
+    'pod', 'version', 'status', 'matchedTag', 'repository', 'podRepository',
+    'overridden', 'toolsVersion', 'detail',
+  ]];
   for (const r of state.results.filter(Boolean)) {
-    rows.push([r.name, r.version, r.status, r.tag, r.sourceUrl, r.toolsVersion, r.detail]);
+    rows.push([
+      r.name, r.version, r.status, r.tag, r.sourceUrl, r.podRepoUrl,
+      r.overridden ? 'yes' : '', r.toolsVersion, r.detail,
+    ]);
   }
   const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
   download('spm-check.csv', `${csv}\r\n`, 'text/csv');
