@@ -276,6 +276,11 @@ export function repoFromBinaryUrl(input) {
   return normalizeGitUrl(`https://github.com/${m[1]}/${m[2].replace(/\.git$/i, '')}`);
 }
 
+/** Search URL for pods with no resolvable git repository. */
+export function swiftPackageIndexUrl(name) {
+  return `https://swiftpackageindex.com/search?query=${encodeURIComponent(name)}`;
+}
+
 /* ------------------------------ Probing ------------------------------ */
 
 /** Tag spellings to try when the podspec does not pin an exact tag. */

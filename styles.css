@@ -389,6 +389,16 @@ tbody tr:hover { background: var(--panel-soft); }
 td.version, td.tag-cell { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
 td.notes { color: var(--muted); min-width: 420px; max-width: 620px; }
 td.repo { max-width: 240px; overflow-wrap: anywhere; }
+.spi-link {
+  display: inline-block;
+  font-size: 13px;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  white-space: nowrap;
+}
+.spi-link:hover { border-color: var(--accent); text-decoration: none; }
 .notes-text {
   display: block;
   white-space: normal;

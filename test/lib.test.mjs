@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {
   md5, shardPath, podspecUrl, rawFileUrl, packageSwiftUrl,
   parsePodfileLock, normalizeGitUrl, repoFromBinaryUrl, tagCandidates, parseOverrides,
-  spmRepoCandidates, scanPod, scanPods,
+  spmRepoCandidates, swiftPackageIndexUrl, scanPod, scanPods,
 } from '../lib.js';
 
 const ok = (body) => ({ ok: true, status: 200, text: async () => body });
@@ -231,6 +231,17 @@ test('repoFromBinaryUrl infers GitHub release and archive repositories', () => {
   assert.equal(repoFromBinaryUrl('https://example.com/Pod.zip'), null);
   assert.equal(repoFromBinaryUrl('https://github.com/a/Pod'), null);
   assert.equal(repoFromBinaryUrl(null), null);
+});
+
+test('swiftPackageIndexUrl searches for the pod name', () => {
+  assert.equal(
+    swiftPackageIndexUrl('FullStory'),
+    'https://swiftpackageindex.com/search?query=FullStory',
+  );
+  assert.equal(
+    swiftPackageIndexUrl('Google-Mobile-Ads-SDK'),
+    'https://swiftpackageindex.com/search?query=Google-Mobile-Ads-SDK',
+  );
 });
 
 test('scanPod: binary pod infers its GitHub repository', async () => {
